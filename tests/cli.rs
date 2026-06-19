@@ -1,6 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::fs;
 use tempfile::tempdir;
 
@@ -401,4 +401,119 @@ fn export_commands_write_json_files() {
     let oi_json: Value = serde_json::from_str(&fs::read_to_string(openinference).unwrap()).unwrap();
     assert!(otel_json.get("resourceSpans").is_some());
     assert!(oi_json.get("spans").is_some());
+}
+
+#[test]
+fn import_codex_jsonl_writes_verifiable_redacted_run_log() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("codex.jsonl");
+    let run = dir.path().join("codex-run.jsonl");
+    let key = dir.path().join("agentprov.key");
+    write_jsonl_fixture(
+        &source,
+        &[
+            json!({"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}),
+            json!({"type":"turn.started"}),
+            json!({"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","aggregated_output":"SECRET_OUTPUT","exit_code":0,"status":"completed"}}),
+            json!({"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"SECRET_MESSAGE"}}),
+            json!({"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":2}}),
+        ],
+    );
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["key", "generate", "--out", key.to_str().unwrap()])
+        .assert()
+        .success();
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "import",
+            "codex",
+            source.to_str().unwrap(),
+            "--out",
+            run.to_str().unwrap(),
+            "--key",
+            key.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("codex import written"))
+        .stdout(predicate::str::contains("AgentProv events: 5"));
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "run",
+            "verify",
+            run.to_str().unwrap(),
+            "--require-signatures",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Events: 5"))
+        .stdout(predicate::str::contains("Signatures: valid"));
+
+    let content = fs::read_to_string(run).unwrap();
+    assert!(content.contains("codex.thread.started"));
+    assert!(content.contains("payload_digest"));
+    assert!(!content.contains("SECRET_OUTPUT"));
+    assert!(!content.contains("SECRET_MESSAGE"));
+}
+
+#[test]
+fn import_claude_jsonl_writes_verifiable_redacted_run_log() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("claude.jsonl");
+    let run = dir.path().join("claude-run.jsonl");
+    write_jsonl_fixture(
+        &source,
+        &[
+            json!({"type":"system","subtype":"init","cwd":"/repo","session_id":"23af37d5-430d-4742-8a9c-62a711435dfd","tools":["Read"],"model":"claude-opus-4-8","permissionMode":"dontAsk","claude_code_version":"2.1.183"}),
+            json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour"},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}),
+            json!({"type":"assistant","message":{"id":"msg_1","model":"claude-opus-4-8","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/repo/Cargo.toml"}}]},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}),
+            json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"SECRET_TOOL_RESULT"}]},"tool_use_result":{"type":"text","file":{"filePath":"/repo/Cargo.toml"}},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}),
+            json!({"type":"assistant","message":{"id":"msg_2","model":"claude-opus-4-8","content":[{"type":"text","text":"SECRET_FINAL"}]},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}),
+            json!({"type":"result","subtype":"success","is_error":false,"duration_ms":10,"num_turns":1,"result":"SECRET_RESULT","session_id":"23af37d5-430d-4742-8a9c-62a711435dfd","usage":{"input_tokens":4,"output_tokens":1}}),
+        ],
+    );
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "import",
+            "claude",
+            source.to_str().unwrap(),
+            "--out",
+            run.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("claude import written"))
+        .stdout(predicate::str::contains("AgentProv events: 6"));
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["run", "verify", run.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Events: 6"));
+
+    let content = fs::read_to_string(run).unwrap();
+    assert!(content.contains("claude.session.started"));
+    assert!(content.contains("payload_digest"));
+    assert!(!content.contains("SECRET_TOOL_RESULT"));
+    assert!(!content.contains("SECRET_FINAL"));
+    assert!(!content.contains("SECRET_RESULT"));
+}
+
+fn write_jsonl_fixture(path: &std::path::Path, values: &[Value]) {
+    let content = values
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+        .join("\n");
+    fs::write(path, format!("{content}\n")).unwrap();
 }

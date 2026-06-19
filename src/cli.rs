@@ -1,6 +1,7 @@
 use crate::canonical::canonical_hash;
 use crate::event::{build_event, event_hash, verify_event_hash};
 use crate::export::{to_openinference_span, to_otel_span};
+use crate::integrations::{import_claude_jsonl, import_codex_jsonl};
 use crate::policy::policy_decision;
 use crate::run_log::{append_jsonl, read_jsonl, verify_run_log, write_jsonl};
 use crate::signing::{
@@ -53,6 +54,10 @@ enum Commands {
     Export {
         #[command(subcommand)]
         command: ExportCommand,
+    },
+    Import {
+        #[command(subcommand)]
+        command: ImportCommand,
     },
 }
 
@@ -183,6 +188,36 @@ enum ExportCommand {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum ImportCommand {
+    #[command(about = "Import Codex `codex exec --json` JSONL into an AgentProv run log")]
+    Codex {
+        #[arg(value_name = "FILE", help = "Codex JSONL file, or '-' for stdin")]
+        file: PathBuf,
+        #[arg(long, help = "Output AgentProv run log path")]
+        out: PathBuf,
+        #[arg(
+            long,
+            help = "Optional local AgentProv key used to sign imported events"
+        )]
+        key: Option<PathBuf>,
+    },
+    #[command(
+        about = "Import Claude Code `--output-format stream-json` JSONL into an AgentProv run log"
+    )]
+    Claude {
+        #[arg(value_name = "FILE", help = "Claude Code JSONL file, or '-' for stdin")]
+        file: PathBuf,
+        #[arg(long, help = "Output AgentProv run log path")]
+        out: PathBuf,
+        #[arg(
+            long,
+            help = "Optional local AgentProv key used to sign imported events"
+        )]
+        key: Option<PathBuf>,
+    },
+}
+
 #[derive(Clone, Debug, ValueEnum)]
 enum TriggerType {
     Manual,
@@ -302,6 +337,7 @@ pub fn run() -> Result<()> {
         Commands::Policy { command } => handle_policy(command),
         Commands::Demo { command } => handle_demo(command),
         Commands::Export { command } => handle_export(command),
+        Commands::Import { command } => handle_import(command),
     }
 }
 
@@ -541,6 +577,30 @@ fn handle_export(command: ExportCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn handle_import(command: ImportCommand) -> Result<()> {
+    match command {
+        ImportCommand::Codex { file, out, key } => {
+            let key = key.as_deref().map(read_key).transpose()?;
+            let report = import_codex_jsonl(&file, &out, key.as_ref())?;
+            print_import_report(&out, &report);
+            Ok(())
+        }
+        ImportCommand::Claude { file, out, key } => {
+            let key = key.as_deref().map(read_key).transpose()?;
+            let report = import_claude_jsonl(&file, &out, key.as_ref())?;
+            print_import_report(&out, &report);
+            Ok(())
+        }
+    }
+}
+
+fn print_import_report(out: &Path, report: &crate::integrations::ImportReport) {
+    println!("{} import written to {}", report.provider, out.display());
+    println!("Run ID: {}", report.run_id);
+    println!("Source events: {}", report.source_events);
+    println!("AgentProv events: {}", report.events);
 }
 
 fn next_event_for_run(

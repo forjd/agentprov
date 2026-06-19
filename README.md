@@ -17,6 +17,7 @@ It is designed to sit beside systems such as Langfuse, Phoenix/OpenInference, Ag
 - Permission checks for agent actions against scoped resources
 - Append-only provenance events linked by canonical hashes
 - Optional local signatures for manifests, events, and run records
+- JSONL imports from Codex and Claude Code agent runs
 - Experimental exports to OpenTelemetry-style and OpenInference-style JSON
 
 ## Quick start
@@ -99,12 +100,24 @@ cargo run -- export otel demo-output/run.jsonl --out run.otlp.json
 cargo run -- export openinference demo-output/run.jsonl --out run.openinference.json
 ```
 
+Import Codex or Claude Code JSONL streams:
+
+```bash
+codex exec --ephemeral --json --sandbox read-only "Summarize this repo." \
+  | cargo run -- import codex - --out runs/codex-run.jsonl
+
+claude -p --output-format stream-json --verbose --no-session-persistence \
+  "Summarize this repo." \
+  | cargo run -- import claude - --out runs/claude-run.jsonl
+```
+
 ## Repository map
 
 - `src/` - Rust CLI and provenance primitives
 - `examples/` - sample manifest, run, event, and policy records
 - `schemas/` - machine-readable JSON Schemas
 - `docs/spec/` - versioned spec notes
+- `docs/agent-tool-integrations.md` - Codex and Claude Code import guide
 - `docs/research/` - research notes from existing OSS tools
 - `docs/mvp-scope.md` - MVP product scope
 - `docs/otel-mapping.md` - OpenTelemetry/OpenInference mapping notes

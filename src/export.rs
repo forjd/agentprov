@@ -14,6 +14,8 @@ pub fn to_otel_span(event: &Value) -> Value {
             "agentprov.event.hash": event.get("event_hash"),
             "agentprov.event.previous_hash": event.get("previous_event_hash"),
             "agentprov.event.sequence": event.get("sequence"),
+            "agentprov.action": event.get("action"),
+            "agentprov.resource": event.get("resource"),
             "gen_ai.operation.name": otel_operation_name(event_type),
             "gen_ai.agent.id": event.pointer("/subject/id"),
             "gen_ai.tool.name": event.get("resource"),
@@ -37,6 +39,9 @@ pub fn to_openinference_span(event: &Value) -> Value {
             "agent.name": event.pointer("/subject/id"),
             "tool.name": event.get("resource"),
             "agentprov.event.hash": event.get("event_hash"),
+            "agentprov.event.type": event_type,
+            "agentprov.action": event.get("action"),
+            "agentprov.resource": event.get("resource"),
         }
     })
 }
