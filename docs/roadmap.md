@@ -160,6 +160,7 @@ Status: partial.
 - event listing filtered by event type
 - pagination metadata with `has_more`
 - HTTP verification with optional signature enforcement
+- percent-decoded string query parameters for HTTP filters
 - structured JSON error responses for malformed HTTP requests
 - collector health check endpoint
 - SQLite indexes for collector run listing and event filtering

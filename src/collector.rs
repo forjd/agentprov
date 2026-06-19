@@ -804,7 +804,7 @@ fn event_list_options(query: Option<&str>) -> Result<EventListOptions> {
     Ok(EventListOptions {
         after_sequence: query_param_u64(query, "after_sequence")?,
         limit: query_param_u64(query, "limit")?,
-        event_type: query_param_string(query, "event_type"),
+        event_type: query_param_string(query, "event_type")?,
     })
 }
 
@@ -840,7 +840,7 @@ fn ingest_options(query: Option<&str>) -> Result<IngestOptions> {
 fn run_list_options(query: Option<&str>) -> Result<RunListOptions> {
     Ok(RunListOptions {
         limit: query_param_u64(query, "limit")?,
-        source: query_param_string(query, "source"),
+        source: query_param_string(query, "source")?,
     })
 }
 
@@ -889,15 +889,56 @@ fn query_param_bool(query: Option<&str>, name: &str) -> Result<Option<bool>> {
     Ok(None)
 }
 
-fn query_param_string(query: Option<&str>, name: &str) -> Option<String> {
-    let query = query?;
+fn query_param_string(query: Option<&str>, name: &str) -> Result<Option<String>> {
+    let Some(query) = query else {
+        return Ok(None);
+    };
     for pair in query.split('&') {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         if key == name {
-            return Some(value.to_owned());
+            return percent_decode_query_value(value)
+                .with_context(|| format!("{name} must use valid percent encoding"))
+                .map(Some);
         }
     }
-    None
+    Ok(None)
+}
+
+fn percent_decode_query_value(value: &str) -> Result<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                decoded.push(b' ');
+                index += 1;
+            }
+            b'%' => {
+                if index + 2 >= bytes.len() {
+                    bail!("incomplete percent escape");
+                }
+                let high = hex_value(bytes[index + 1]).context("invalid percent escape")?;
+                let low = hex_value(bytes[index + 2]).context("invalid percent escape")?;
+                decoded.push((high << 4) | low);
+                index += 3;
+            }
+            byte => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).context("decoded query value is not UTF-8")
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn parse_jsonl_body(body: &str) -> Result<Vec<Value>> {
@@ -1079,6 +1120,13 @@ mod tests {
         );
         assert!(bad_boolean.starts_with("HTTP/1.1 400 Bad Request"));
         assert!(bad_boolean.contains("\"error\":\"require_signatures must be true or false\""));
+
+        let bad_percent = http_response_for_request(
+            "GET /runs?source=runs%2Gbad HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            &db,
+        );
+        assert!(bad_percent.starts_with("HTTP/1.1 400 Bad Request"));
+        assert!(bad_percent.contains("\"error\":\"source must use valid percent encoding"));
     }
 
     #[test]
@@ -1159,16 +1207,16 @@ mod tests {
         let mut store = CollectorStore::open(&db).unwrap();
 
         for (run_id, source) in [
-            ("run_http_one", "source-a"),
+            ("run_http_one", "runs/source a.jsonl"),
             ("run_http_two", "source-b"),
-            ("run_http_three", "source-a"),
+            ("run_http_three", "runs/source a.jsonl"),
         ] {
             let start = build_event_from_input(EventInput::new(run_id, 1, "run.start")).unwrap();
             store.ingest_events(source, &[start]).unwrap();
         }
 
         let response = http_response_for_request(
-            "GET /runs?source=source-a&limit=1 HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            "GET /runs?source=runs%2Fsource+a.jsonl&limit=1 HTTP/1.1\r\nHost: localhost\r\n\r\n",
             &db,
         );
         assert!(response.starts_with("HTTP/1.1 200 OK"));
@@ -1176,10 +1224,10 @@ mod tests {
         let value: Value = serde_json::from_str(body).unwrap();
         assert_eq!(value["count"], 1);
         assert_eq!(value["limit"], 1);
-        assert_eq!(value["source"], "source-a");
+        assert_eq!(value["source"], "runs/source a.jsonl");
         assert_eq!(value["has_more"], true);
         assert_eq!(value["runs"].as_array().unwrap().len(), 1);
-        assert_eq!(value["runs"][0]["source"], "source-a");
+        assert_eq!(value["runs"][0]["source"], "runs/source a.jsonl");
         assert_eq!(value["runs"][0]["event_count"], 1);
         assert_eq!(value["runs"][0]["last_sequence"], 1);
         assert!(

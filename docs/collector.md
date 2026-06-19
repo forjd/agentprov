@@ -125,11 +125,13 @@ Response:
 
 Returns known runs with per-run `event_count`, `last_sequence`, and
 `last_event_hash` values. Optional `limit` returns a bounded page, and optional
-`source` returns runs whose stored source exactly matches the supplied value:
+`source` returns runs whose stored source exactly matches the supplied value.
+URL-encode string query values that contain spaces, slashes, or other reserved
+characters:
 
 ```text
 GET /runs?limit=25
-GET /runs?source=http-stream&limit=25
+GET /runs?source=runs%2Frun_123.jsonl&limit=25
 ```
 
 Responses include `count`, `limit`, `source`, and `has_more` metadata.
