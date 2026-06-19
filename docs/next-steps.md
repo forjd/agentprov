@@ -51,6 +51,7 @@ Implemented:
 - collector ingest rejects invalid event chains
 - collector ingest can require event signatures
 - streaming HTTP collector endpoint for verified single-event appends
+- streaming append can require event signatures
 - bounded collector run listing with `has_more`
 - bounded collector event listing by event sequence
 - collector event filtering by event type
@@ -234,6 +235,7 @@ Completed:
 - import/export path between JSONL files and stored runs
 - HTTP JSONL export endpoint for stored runs
 - streaming append endpoint for one verified event at a time
+- optional signature enforcement on streaming append
 - bounded run listing with `has_more`
 - bounded event listing by stable event sequence
 - event listing filtered by event type

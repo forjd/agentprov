@@ -16,6 +16,11 @@ pub struct EventListOptions {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
+pub struct AppendOptions {
+    pub require_signatures: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
 pub struct IngestOptions {
     pub require_signatures: bool,
 }
@@ -129,6 +134,16 @@ impl CollectorStore {
     }
 
     pub fn append_event(&mut self, source: &str, run_id: &str, event: Value) -> Result<Value> {
+        self.append_event_with_options(source, run_id, event, AppendOptions::default())
+    }
+
+    pub fn append_event_with_options(
+        &mut self,
+        source: &str,
+        run_id: &str,
+        event: Value,
+        options: AppendOptions,
+    ) -> Result<Value> {
         let event_run_id = event
             .get("run_id")
             .and_then(Value::as_str)
@@ -153,7 +168,7 @@ impl CollectorStore {
 
         let mut events = self.run_events_or_empty(run_id)?;
         events.push(event.clone());
-        verify_events(&events, false)?;
+        verify_events(&events, options.require_signatures)?;
 
         let tx = self.connection.transaction()?;
         tx.execute(
@@ -573,7 +588,12 @@ fn route_http_request(request: &str, db: &Path) -> Result<String> {
                 .trim_start_matches("/runs/")
                 .trim_end_matches("/events")
                 .trim_end_matches('/');
-            let report = store.append_event("http-stream", run_id, parse_json_body(body)?)?;
+            let report = store.append_event_with_options(
+                "http-stream",
+                run_id,
+                parse_json_body(body)?,
+                append_options(query)?,
+            )?;
             json_response(200, &report)?
         }
         ("GET", "/runs") => json_response(200, &store.list_runs_json(run_list_options(query)?)?)?,
@@ -680,6 +700,12 @@ fn event_list_options(query: Option<&str>) -> Result<EventListOptions> {
         after_sequence: query_param_u64(query, "after_sequence")?,
         limit: query_param_u64(query, "limit")?,
         event_type: query_param_string(query, "event_type"),
+    })
+}
+
+fn append_options(query: Option<&str>) -> Result<AppendOptions> {
+    Ok(AppendOptions {
+        require_signatures: query_param_bool(query, "require_signatures")?.unwrap_or(false),
     })
 }
 
@@ -811,6 +837,7 @@ fn escape_html(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::event::{EventInput, build_event_from_input};
+    use crate::signing::{generate_key, sign_value};
     use tempfile::tempdir;
 
     #[test]
@@ -967,6 +994,59 @@ mod tests {
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
             .collect::<Vec<_>>();
         assert_eq!(exported, vec![start, tool]);
+    }
+
+    #[test]
+    fn http_append_can_require_signatures() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("collector.sqlite");
+        let mut store = CollectorStore::open(&db).unwrap();
+        let key = generate_key();
+
+        let mut start =
+            build_event_from_input(EventInput::new("run_http_signed_stream", 1, "run.start"))
+                .unwrap();
+        sign_value(&mut start, &key).unwrap();
+        store.ingest_events("test", &[start.clone()]).unwrap();
+
+        let mut unsigned = EventInput::new("run_http_signed_stream", 2, "tool.execute");
+        unsigned.previous_event_hash = Some(start["event_hash"].as_str().unwrap().to_owned());
+        let unsigned = serde_json::to_string(&build_event_from_input(unsigned).unwrap()).unwrap();
+        let strict_response = http_response_for_request(
+            &format!(
+                "POST /runs/run_http_signed_stream/events?require_signatures=true HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+                unsigned.len(),
+                unsigned
+            ),
+            &db,
+        );
+        assert!(strict_response.starts_with("HTTP/1.1 400 Bad Request"));
+        assert!(strict_response.contains("\"error\":\"missing signature at sequence 2\""));
+        assert_eq!(store.run_events("run_http_signed_stream").unwrap().len(), 1);
+
+        let mut signed = EventInput::new("run_http_signed_stream", 2, "tool.execute");
+        signed.previous_event_hash = Some(start["event_hash"].as_str().unwrap().to_owned());
+        let mut signed = build_event_from_input(signed).unwrap();
+        sign_value(&mut signed, &key).unwrap();
+        let signed = serde_json::to_string(&signed).unwrap();
+        let ok_response = http_response_for_request(
+            &format!(
+                "POST /runs/run_http_signed_stream/events?require_signatures=true HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+                signed.len(),
+                signed
+            ),
+            &db,
+        );
+        assert!(ok_response.starts_with("HTTP/1.1 200 OK"));
+        let body = ok_response.split("\r\n\r\n").nth(1).unwrap();
+        let value: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(value["sequence"], 2);
+
+        let strict_verify = CollectorStore::open(&db)
+            .unwrap()
+            .verify_run("run_http_signed_stream", true)
+            .unwrap();
+        assert_eq!(strict_verify["events"], 2);
     }
 
     #[test]

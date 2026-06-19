@@ -1,4 +1,6 @@
-use agentprov::collector::{CollectorStore, EventListOptions, IngestOptions, RunListOptions};
+use agentprov::collector::{
+    AppendOptions, CollectorStore, EventListOptions, IngestOptions, RunListOptions,
+};
 use agentprov::event::{EventInput, build_event_from_input, event_hash};
 use agentprov::run_log::{AppendEventInput, append_event_to_run, read_jsonl, write_jsonl};
 use agentprov::signing::{generate_key, sign_value};
@@ -172,6 +174,62 @@ fn collector_appends_streamed_events_and_rejects_invalid_links() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("does not match target run"));
+}
+
+#[test]
+fn collector_append_can_require_signatures() {
+    let mut store = CollectorStore::open_memory().unwrap();
+    let key = generate_key();
+
+    let mut start =
+        build_event_from_input(EventInput::new("run_signed_stream", 1, "run.start")).unwrap();
+    sign_value(&mut start, &key).unwrap();
+    store
+        .append_event_with_options(
+            "test-stream",
+            "run_signed_stream",
+            start.clone(),
+            AppendOptions {
+                require_signatures: true,
+            },
+        )
+        .unwrap();
+
+    let mut unsigned = EventInput::new("run_signed_stream", 2, "tool.execute");
+    unsigned.previous_event_hash = Some(start["event_hash"].as_str().unwrap().to_owned());
+    let unsigned = build_event_from_input(unsigned).unwrap();
+    let error = store
+        .append_event_with_options(
+            "test-stream",
+            "run_signed_stream",
+            unsigned,
+            AppendOptions {
+                require_signatures: true,
+            },
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("missing signature at sequence 2"));
+    assert_eq!(store.run_events("run_signed_stream").unwrap().len(), 1);
+
+    let mut signed = EventInput::new("run_signed_stream", 2, "tool.execute");
+    signed.previous_event_hash = Some(start["event_hash"].as_str().unwrap().to_owned());
+    let mut signed = build_event_from_input(signed).unwrap();
+    sign_value(&mut signed, &key).unwrap();
+    store
+        .append_event_with_options(
+            "test-stream",
+            "run_signed_stream",
+            signed,
+            AppendOptions {
+                require_signatures: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        store.verify_run("run_signed_stream", true).unwrap()["events"],
+        2
+    );
 }
 
 #[test]

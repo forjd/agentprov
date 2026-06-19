@@ -80,6 +80,12 @@ Response:
 Request body: one AgentProv event JSON object. The collector verifies the full
 stored event chain plus the new event before inserting it. A sequence-1 event
 creates the run; later events must link to the previous stored event hash.
+Optional `require_signatures=true` rejects an unsigned appended event or an
+unsigned existing event in the stored chain:
+
+```text
+POST /runs/run_123/events?require_signatures=true
+```
 
 Response:
 
