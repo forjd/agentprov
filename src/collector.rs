@@ -1,7 +1,7 @@
 use crate::run_log::{read_jsonl, verify_events, write_jsonl};
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{Read, Write};
@@ -280,12 +280,49 @@ impl CollectorStore {
         Ok(count > 0)
     }
 
+    fn has_more_events(
+        &self,
+        run_id: &str,
+        after_sequence: u64,
+        event_type: Option<&str>,
+    ) -> Result<bool> {
+        let after_sequence =
+            i64::try_from(after_sequence).context("after_sequence is too large for SQLite")?;
+        let exists: Option<i64> = if let Some(event_type) = event_type {
+            self.connection
+                .query_row(
+                    "SELECT 1 FROM events WHERE run_id = ?1 AND sequence > ?2 AND event_type = ?3 LIMIT 1",
+                    params![run_id, after_sequence, event_type],
+                    |row| row.get(0),
+                )
+                .optional()?
+        } else {
+            self.connection
+                .query_row(
+                    "SELECT 1 FROM events WHERE run_id = ?1 AND sequence > ?2 LIMIT 1",
+                    params![run_id, after_sequence],
+                    |row| row.get(0),
+                )
+                .optional()?
+        };
+        Ok(exists.is_some())
+    }
+
     pub fn run_events_json(&self, run_id: &str, options: EventListOptions) -> Result<Value> {
         let events = self.run_events_page(run_id, options.clone())?;
         let next_after_sequence = events
             .last()
             .and_then(|event| event.get("sequence"))
             .and_then(Value::as_u64);
+        let has_more = if options.limit.is_some() {
+            if let Some(next_after_sequence) = next_after_sequence {
+                self.has_more_events(run_id, next_after_sequence, options.event_type.as_deref())?
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         let count = events.len();
         Ok(json!({
             "run_id": run_id,
@@ -294,6 +331,7 @@ impl CollectorStore {
             "after_sequence": options.after_sequence,
             "limit": options.limit,
             "event_type": options.event_type,
+            "has_more": has_more,
             "next_after_sequence": next_after_sequence,
         }))
     }
@@ -694,6 +732,7 @@ mod tests {
         let value: Value = serde_json::from_str(body).unwrap();
         assert_eq!(value["count"], 1);
         assert_eq!(value["event_type"], "tool.execute");
+        assert_eq!(value["has_more"], false);
         assert_eq!(value["events"][0]["event_type"], "tool.execute");
         assert_eq!(value["next_after_sequence"], 2);
     }

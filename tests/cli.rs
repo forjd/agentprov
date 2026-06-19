@@ -238,6 +238,7 @@ fn collector_events_supports_sequence_bounds() {
     assert_eq!(value["after_sequence"], 1);
     assert_eq!(value["limit"], 1);
     assert_eq!(value["event_type"], "tool.execute");
+    assert_eq!(value["has_more"], false);
     assert_eq!(value["next_after_sequence"], 2);
     assert_eq!(value["events"][0]["sequence"], 2);
     assert_eq!(value["events"][0]["event_type"], "tool.execute");

@@ -137,6 +137,7 @@ fn collector_lists_bounded_event_pages() {
     assert_eq!(page["count"], 2);
     assert_eq!(page["after_sequence"], 1);
     assert_eq!(page["limit"], 2);
+    assert_eq!(page["has_more"], true);
     assert_eq!(page["next_after_sequence"], 3);
     assert_eq!(page["events"][0]["sequence"], 2);
     assert_eq!(page["events"][0]["action"], "tool.first");
@@ -156,6 +157,7 @@ fn collector_lists_bounded_event_pages() {
 
     assert_eq!(filtered_page["count"], 2);
     assert_eq!(filtered_page["event_type"], "tool.execute");
+    assert_eq!(filtered_page["has_more"], false);
     assert_eq!(filtered_page["next_after_sequence"], 4);
     assert_eq!(filtered_page["events"][0]["sequence"], 2);
     assert_eq!(filtered_page["events"][1]["sequence"], 4);
@@ -171,6 +173,7 @@ fn collector_lists_bounded_event_pages() {
         )
         .unwrap();
     assert_eq!(empty_page["count"], 0);
+    assert_eq!(empty_page["has_more"], false);
     assert!(empty_page["events"].as_array().unwrap().is_empty());
     assert!(empty_page["next_after_sequence"].is_null());
 }

@@ -96,6 +96,9 @@ sequence:
 GET /runs/run_123/events?after_sequence=100&limit=50&event_type=permission.check
 ```
 
+Responses include `count`, `next_after_sequence`, and `has_more` metadata for
+client-side paging.
+
 `GET /runs/<run_id>/verify`
 
 Runs event-chain verification for one stored run.

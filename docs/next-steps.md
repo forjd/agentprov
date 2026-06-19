@@ -51,6 +51,7 @@ Implemented:
 - streaming HTTP collector endpoint for verified single-event appends
 - bounded collector event listing by event sequence
 - collector event filtering by event type
+- collector event pagination metadata with `has_more`
 - structured JSON errors for collector HTTP requests
 - static read-only collector dashboard export
 - trust semantics note for local signatures, manifest binding, run envelopes, and
@@ -228,12 +229,13 @@ Completed:
 - streaming append endpoint for one verified event at a time
 - bounded event listing by stable event sequence
 - event listing filtered by event type
+- pagination metadata with `has_more`
 - structured JSON error responses for malformed HTTP requests
 
 Future production work:
 
 - authentication and transport security design
-- richer pagination metadata and larger-run query ergonomics
+- larger-run query ergonomics
 - Postgres persistence option if needed
 
 ## Milestone 8: Read-only UI
