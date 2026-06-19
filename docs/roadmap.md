@@ -91,6 +91,7 @@ Status: partial.
 - typed Rust event and run-log append inputs
 - stable Rust functions for event hashing, run-log verification, signing,
   signature verification, and policy checks
+- top-level Rust crate exports for common embedding primitives
 - minimal library-level Rust example
 
 Future work:

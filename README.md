@@ -141,6 +141,9 @@ cargo run --example discord_tool_event -- runs/discord-tool-event.jsonl
 cargo run --example scheduled_run -- runs/scheduled-run.jsonl
 ```
 
+The `library_api` example uses top-level crate exports such as `EventInput`,
+`AppendEventInput`, and `verify_run_log` for embedding AgentProv in Rust code.
+
 Use the local collector:
 
 ```bash
