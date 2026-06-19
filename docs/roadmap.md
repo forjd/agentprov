@@ -146,11 +146,12 @@ Status: partial.
 - query API for runs/events
 - verification endpoint
 - streaming append endpoint for one verified event at a time
+- bounded event listing by stable event sequence
 
 Future work:
 
 - authentication and transport security design
-- pagination and larger-run query ergonomics
+- richer pagination metadata and larger-run query ergonomics
 - Postgres persistence option if needed
 
 ## Phase 9: UI

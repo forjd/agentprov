@@ -8,6 +8,12 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EventListOptions {
+    pub after_sequence: Option<u64>,
+    pub limit: Option<u64>,
+}
+
 pub struct CollectorStore {
     connection: Connection,
 }
@@ -184,6 +190,44 @@ impl CollectorStore {
         Ok(events)
     }
 
+    pub fn run_events_page(&self, run_id: &str, options: EventListOptions) -> Result<Vec<Value>> {
+        if !self.run_exists(run_id)? {
+            bail!("run not found: {run_id}");
+        }
+        let after_sequence = options
+            .after_sequence
+            .map(i64::try_from)
+            .transpose()
+            .context("after_sequence is too large for SQLite")?
+            .unwrap_or(0);
+        let limit = options
+            .limit
+            .map(i64::try_from)
+            .transpose()
+            .context("limit is too large for SQLite")?;
+        let event_json = if let Some(limit) = limit {
+            let mut statement = self.connection.prepare(
+                "SELECT event_json FROM events WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence ASC LIMIT ?3",
+            )?;
+            let rows = statement.query_map(params![run_id, after_sequence, limit], |row| {
+                row.get::<_, String>(0)
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            let mut statement = self.connection.prepare(
+                "SELECT event_json FROM events WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence ASC",
+            )?;
+            let rows = statement.query_map(params![run_id, after_sequence], |row| {
+                row.get::<_, String>(0)
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        event_json
+            .into_iter()
+            .map(|event| serde_json::from_str(&event).context("parse stored event JSON"))
+            .collect()
+    }
+
     fn run_events_or_empty(&self, run_id: &str) -> Result<Vec<Value>> {
         let mut statement = self
             .connection
@@ -196,10 +240,29 @@ impl CollectorStore {
             .collect()
     }
 
-    pub fn run_events_json(&self, run_id: &str) -> Result<Value> {
+    fn run_exists(&self, run_id: &str) -> Result<bool> {
+        let count: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM runs WHERE run_id = ?1",
+            params![run_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn run_events_json(&self, run_id: &str, options: EventListOptions) -> Result<Value> {
+        let events = self.run_events_page(run_id, options)?;
+        let next_after_sequence = events
+            .last()
+            .and_then(|event| event.get("sequence"))
+            .and_then(Value::as_u64);
+        let count = events.len();
         Ok(json!({
             "run_id": run_id,
-            "events": self.run_events(run_id)?,
+            "events": events,
+            "count": count,
+            "after_sequence": options.after_sequence,
+            "limit": options.limit,
+            "next_after_sequence": next_after_sequence,
         }))
     }
 
@@ -333,7 +396,8 @@ fn handle_connection(mut stream: TcpStream, db: &Path) -> Result<()> {
     let request_line = lines.next().context("missing HTTP request line")?;
     let mut parts = request_line.split_whitespace();
     let method = parts.next().context("missing HTTP method")?;
-    let path = parts.next().context("missing HTTP path")?;
+    let target = parts.next().context("missing HTTP path")?;
+    let (path, query) = split_request_target(target);
     let mut store = CollectorStore::open(db)?;
 
     let response = match (method, path) {
@@ -356,7 +420,10 @@ fn handle_connection(mut stream: TcpStream, db: &Path) -> Result<()> {
                 .trim_start_matches("/runs/")
                 .trim_end_matches("/events")
                 .trim_end_matches('/');
-            json_response(200, &store.run_events_json(run_id)?)?
+            json_response(
+                200,
+                &store.run_events_json(run_id, event_list_options(query)?)?,
+            )?
         }
         ("GET", path) if path.starts_with("/runs/") && path.ends_with("/verify") => {
             let run_id = path
@@ -403,6 +470,40 @@ fn content_length(headers: &str) -> Option<usize> {
             .then(|| value.trim().parse().ok())
             .flatten()
     })
+}
+
+fn split_request_target(target: &str) -> (&str, Option<&str>) {
+    if let Some((path, query)) = target.split_once('?') {
+        (path, Some(query))
+    } else {
+        (target, None)
+    }
+}
+
+fn event_list_options(query: Option<&str>) -> Result<EventListOptions> {
+    Ok(EventListOptions {
+        after_sequence: query_param_u64(query, "after_sequence")?,
+        limit: query_param_u64(query, "limit")?,
+    })
+}
+
+fn query_param_u64(query: Option<&str>, name: &str) -> Result<Option<u64>> {
+    let Some(query) = query else {
+        return Ok(None);
+    };
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if key == name {
+            let parsed = value
+                .parse::<u64>()
+                .with_context(|| format!("{name} must be an unsigned integer"))?;
+            if name == "limit" && parsed == 0 {
+                bail!("limit must be greater than 0");
+            }
+            return Ok(Some(parsed));
+        }
+    }
+    Ok(None)
 }
 
 fn parse_jsonl_body(body: &str) -> Result<Vec<Value>> {

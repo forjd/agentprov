@@ -139,6 +139,7 @@ Use the local collector:
 cargo run -- collector ingest demo-output/run.jsonl --db agentprov.sqlite
 cargo run -- collector runs --db agentprov.sqlite
 cargo run -- collector events run_demo_manual_tool --db agentprov.sqlite
+cargo run -- collector events run_demo_manual_tool --db agentprov.sqlite --after-sequence 100 --limit 50
 cargo run -- collector verify run_demo_manual_tool --db agentprov.sqlite
 cargo run -- collector ui --db agentprov.sqlite --out collector.html
 cargo run -- collector serve --addr 127.0.0.1:8787 --db agentprov.sqlite

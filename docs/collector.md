@@ -22,6 +22,7 @@ Read events for a run:
 
 ```bash
 agentprov collector events run_123 --db agentprov.sqlite
+agentprov collector events run_123 --db agentprov.sqlite --after-sequence 100 --limit 50
 ```
 
 Verify a stored run:
@@ -80,7 +81,12 @@ Returns known runs.
 
 `GET /runs/<run_id>/events`
 
-Returns stored event JSON for one run.
+Returns stored event JSON for one run. Optional `after_sequence` and `limit`
+query parameters return a bounded page by stable event sequence:
+
+```text
+GET /runs/run_123/events?after_sequence=100&limit=50
+```
 
 `GET /runs/<run_id>/verify`
 
@@ -89,7 +95,7 @@ Runs event-chain verification for one stored run.
 ## Limitations
 
 - The server is intentionally small and local-first.
-- There is no authentication, TLS, pagination, or multi-tenant isolation.
+- There is no authentication, TLS, cursor token API, or multi-tenant isolation.
 - Streaming append accepts complete AgentProv event records; it does not yet
   expose a typed event builder over HTTP.
 - The HTML dashboard is a static read-only export, not a live web application.

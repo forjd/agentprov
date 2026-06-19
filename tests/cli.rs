@@ -155,6 +155,88 @@ fn run_log_can_be_initialised_appended_and_verified() {
 }
 
 #[test]
+fn collector_events_supports_sequence_bounds() {
+    let dir = tempdir().unwrap();
+    let run = dir.path().join("run.jsonl");
+    let db = dir.path().join("collector.sqlite");
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "run",
+            "init",
+            "--agent",
+            "examples/manifest.json",
+            "--trigger",
+            "manual",
+            "--out",
+            run.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    for action in ["tool.first", "tool.second"] {
+        Command::cargo_bin("agentprov")
+            .unwrap()
+            .args([
+                "event",
+                "append",
+                "--run",
+                run.to_str().unwrap(),
+                "--type",
+                "tool.execute",
+                "--action",
+                action,
+            ])
+            .assert()
+            .success();
+    }
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "collector",
+            "ingest",
+            run.to_str().unwrap(),
+            "--db",
+            db.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let run_id = read_jsonl_fixture(&run)[0]["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let output = Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "collector",
+            "events",
+            &run_id,
+            "--db",
+            db.to_str().unwrap(),
+            "--after-sequence",
+            "1",
+            "--limit",
+            "1",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let value: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(value["count"], 1);
+    assert_eq!(value["after_sequence"], 1);
+    assert_eq!(value["limit"], 1);
+    assert_eq!(value["next_after_sequence"], 2);
+    assert_eq!(value["events"][0]["sequence"], 2);
+    assert_eq!(value["events"][0]["action"], "tool.first");
+}
+
+#[test]
 fn run_verify_rejects_tampered_log() {
     let dir = tempdir().unwrap();
     let run = dir.path().join("run.jsonl");

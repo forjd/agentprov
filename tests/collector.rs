@@ -1,4 +1,4 @@
-use agentprov::collector::CollectorStore;
+use agentprov::collector::{CollectorStore, EventListOptions};
 use agentprov::event::{EventInput, build_event_from_input, event_hash};
 use agentprov::run_log::{AppendEventInput, append_event_to_run, write_jsonl};
 use serde_json::json;
@@ -91,4 +91,56 @@ fn collector_appends_streamed_events_and_rejects_invalid_links() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("does not match target run"));
+}
+
+#[test]
+fn collector_lists_bounded_event_pages() {
+    let dir = tempdir().unwrap();
+    let run = dir.path().join("run.jsonl");
+    let db = dir.path().join("collector.sqlite");
+
+    let mut start = EventInput::new("run_page_test", 1, "run.start");
+    start.action = Some("trigger.manual".to_owned());
+    write_jsonl(&run, &[build_event_from_input(start).unwrap()]).unwrap();
+
+    for action in ["tool.first", "tool.second", "tool.third"] {
+        let mut append = AppendEventInput::new("tool.execute");
+        append.action = Some(action.to_owned());
+        append_event_to_run(&run, append).unwrap();
+    }
+
+    let mut store = CollectorStore::open(&db).unwrap();
+    store.ingest_jsonl_file(&run).unwrap();
+
+    let page = store
+        .run_events_json(
+            "run_page_test",
+            EventListOptions {
+                after_sequence: Some(1),
+                limit: Some(2),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(page["count"], 2);
+    assert_eq!(page["after_sequence"], 1);
+    assert_eq!(page["limit"], 2);
+    assert_eq!(page["next_after_sequence"], 3);
+    assert_eq!(page["events"][0]["sequence"], 2);
+    assert_eq!(page["events"][0]["action"], "tool.first");
+    assert_eq!(page["events"][1]["sequence"], 3);
+    assert_eq!(page["events"][1]["action"], "tool.second");
+
+    let empty_page = store
+        .run_events_json(
+            "run_page_test",
+            EventListOptions {
+                after_sequence: Some(4),
+                limit: Some(2),
+            },
+        )
+        .unwrap();
+    assert_eq!(empty_page["count"], 0);
+    assert!(empty_page["events"].as_array().unwrap().is_empty());
+    assert!(empty_page["next_after_sequence"].is_null());
 }
