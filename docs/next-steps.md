@@ -1,39 +1,89 @@
 # Next Steps
 
-AgentProv currently has a useful seed repository: research notes, MVP scope, schema sketches, OpenTelemetry/OpenInference mapping notes, a threat model, examples, CI, and a small Rust CLI for example records and single-event hashing/verification.
-
-The next goal is to turn it from a research-backed skeleton into a small, demonstrable provenance primitive.
-
-## Current state
+AgentProv now has a working Rust CLI MVP for signed, tamper-evident provenance
+records. The core run-log primitive exists: records can be generated, appended,
+hashed, signed with local development keys, verified as an event chain, checked
+against static policy, imported from Codex or Claude Code JSONL streams, and
+exported to experimental OpenTelemetry-style and OpenInference-style JSON.
 
 Repository: https://github.com/forjd/agentprov
+
+## Current state
 
 Implemented:
 
 - Rust CLI crate
-- MIT licence
-- CI workflow
+- MIT license
+- CI and release workflows
+- changelog, release notes template, and release process notes
 - research summary and detailed findings
-- MVP scope
-- schema sketches
-- threat model
-- roadmap
-- OpenTelemetry/OpenInference mapping notes
-- example manifest/run/event JSON files
-- CLI commands:
-  - `agentprov manifest example`
-  - `agentprov manifest hash <file>`
-  - `agentprov run example`
-  - `agentprov event hash <file>`
-  - `agentprov event verify <file>`
+- MVP scope, threat model, and OpenTelemetry/OpenInference mapping notes
+- versioned spec notes for manifest, run envelope, event, policy, local key, and
+  AgentProv OTel attributes
+- JSON Schemas for manifest, run envelope, event, and policy examples
+- example manifest, run envelope, event, and policy records
+- append-only JSONL run logs
+- canonical BLAKE3 event hashing
+- whole-run chain verification
+- local Ed25519 development keys
+- manifest and event signing
+- manifest signature verification
+- optional run-log verification against a supplied manifest digest
+- signature verification for events and signed run logs
+- static policy checks with allow, deny, and require-approval rules
+- policy rule expiry support
+- approval request event emission for `require_approval` decisions
+- deterministic manual tool-run demo
+- Codex and Claude Code JSONL importers
+- importer redaction rules for command text, assistant text, and tool results
+- experimental OTel-shaped and OpenInference-shaped JSON exports
+- export shape tests for OTel-style and OpenInference-style JSON
+- embedded schema validation command for manifest, run envelope, event, and
+  policy records
+- run verification rejects wrong event schema versions and mixed `run_id` values
+- typed Rust inputs for event construction and run-log appending
+- deterministic OpenAI-style, Anthropic-style, LiteLLM-style, GitHub tool,
+  Discord tool, and scheduled-run Rust examples
+- local SQLite collector with CLI ingest, query, and verification commands
+- local HTTP collector endpoints for JSONL ingest, run listing, event lookup, and
+  verification
+- static read-only collector dashboard export
+- trust semantics note for local signatures, manifest binding, run envelopes, and
+  future trust roots
+- observability consumer notes for OTel-shaped and OpenInference-shaped exports
 
-Verified:
+Current CLI commands:
 
-- `cargo fmt --check`
-- `cargo clippy --all-targets -- -D warnings`
-- `cargo test`
-- `cargo build --release`
-- GitHub Actions CI is passing
+```text
+agentprov manifest example
+agentprov manifest hash <file>
+agentprov manifest sign <file> --key <key> --out <file>
+agentprov manifest verify-signature <file>
+agentprov run example
+agentprov run init --agent <manifest> --trigger <type> --out <file>
+agentprov run verify <jsonl> [--require-signatures] [--manifest <manifest>]
+agentprov event hash <file>
+agentprov event verify <file>
+agentprov event append --run <jsonl> --type <event-type>
+agentprov event sign <file> --key <key> --out <file>
+agentprov event verify-signature <file>
+agentprov key generate --out <file>
+agentprov key public --key <file>
+agentprov key inspect --key <file>
+agentprov policy check --policy <file> --agent <id> --action <action> --resource <resource>
+agentprov demo manual-tool-run --out <dir>
+agentprov export otel <jsonl> --out <file>
+agentprov export openinference <jsonl> --out <file>
+agentprov import codex <jsonl-or-> --out <jsonl> [--key <key>]
+agentprov import claude <jsonl-or-> --out <jsonl> [--key <key>]
+agentprov validate <manifest|run-envelope|event|policy> <file>
+agentprov collector ingest <jsonl> --db <db>
+agentprov collector runs --db <db>
+agentprov collector events <run_id> --db <db>
+agentprov collector verify <run_id> --db <db> [--require-signatures]
+agentprov collector ui --db <db> --out <html>
+agentprov collector serve --addr <addr> --db <db>
+```
 
 ## Recommended direction
 
@@ -49,254 +99,155 @@ Or:
 
 The useful comparison line is:
 
-> Langfuse, Phoenix and AgentOps show what happened. AgentProv proves who ran it, with what authority, and whether the record still verifies.
-
-## Phase 1: Make run verification real
+> Langfuse, Phoenix and AgentOps show what happened. AgentProv proves who ran it,
+> with what authority, and whether the record still verifies.
 
-The current CLI verifies one event hash. The next milestone should verify a full append-only run log.
+## Milestone 1: Tighten the current MVP
 
-### Target behaviour
+The current primitive works, so the next work should make it harder to misuse.
 
-```bash
-agentprov run init --agent examples/manifest.json --trigger manual --out runs/run_123.jsonl
-agentprov event append --run runs/run_123.jsonl --type permission.check --action discord.message.create --resource discord://guild/123/channel/456
-agentprov event append --run runs/run_123.jsonl --type tool.execute --action discord.message.create --resource discord://guild/123/channel/456
-agentprov run verify runs/run_123.jsonl
-```
+Completed:
 
-Expected output:
+- keep `docs/roadmap.md`, this file, and the README aligned with implemented
+  behaviour
+- add runtime schema validation for manifests, run envelopes, events, and
+  policies
+- strengthen `run verify` so it rejects inconsistent `run_id` values and wrong
+  schema versions
+- add negative tests for malformed run logs and signature requirements
+- add a manifest signature verification command
+- support explicit `run verify --manifest <file>` binding checks
 
-```text
-Run verifies
-Events: 2
-Event chain: valid
-Signatures: not present
-```
+Local MVP gap status: complete. Production profiles should make
+manifest binding and trusted key sources mandatory.
 
-### Required work
+Acceptance criteria:
 
-- Add a `RunLog` concept based on newline-delimited JSON events.
-- Add `run init` command.
-- Add `event append` command.
-- Each appended event should:
-  - increment sequence number
-  - copy the previous event hash
-  - compute its own event hash
-  - write one JSON line
-- Add `run verify` command.
-- Verification should fail if:
-  - sequence numbers skip or repeat
-  - `previous_event_hash` does not match the prior event
-  - an event hash is wrong
-  - the file contains invalid JSON
+- `cargo fmt --check`
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo test`
+- `cargo build --release`
 
-### Acceptance criteria
+## Milestone 2: Clarify trust semantics
 
-- Integration tests cover valid and tampered run logs.
-- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` pass.
+Local signatures currently prove that a record matches the embedded public key.
+They do not establish that the key is trusted by an organisation.
 
-## Phase 2: Add signing
+Completed:
 
-Once event chains work, add Ed25519 signing.
+- bind run logs to manifest digests and key IDs in a documented production trust
+  model
+- document exactly what local signatures prove and what they do not prove
+- decide whether run logs remain event-only or whether a signed run envelope is
+  stored alongside the JSONL event chain
+- add design notes for future key registries, KMS/HSM, workload identity, or
+  transparency logs
 
-### Target behaviour
+## Milestone 3: Improve policy and approval records
 
-```bash
-agentprov key generate --out agentprov.key
-agentprov manifest sign examples/manifest.json --key agentprov.key --out examples/manifest.signed.json
-agentprov event sign examples/event.json --key agentprov.key --out examples/event.signed.json
-agentprov event verify-signature examples/event.signed.json
-agentprov run verify runs/run_123.jsonl --require-signatures
-```
+The static policy MVP is useful, but approval flows are still mostly schema
+shape rather than workflow.
 
-### Required work
+Completed:
 
-- Add key generation.
-- Add public key export.
-- Add manifest signing.
-- Add event signing.
-- Add signature verification.
-- Decide how keys are represented on disk.
-- Document that MVP key handling is for local experimentation, not production key management.
+- expand tests for deny priority, require-approval priority, unmatched agents,
+  and wildcard edge cases
+- decide whether `require_approval` should emit an approval-needed event
+- implement `expires_at` support
+- add examples for `human.approval.request`, `human.approval.grant`, and
+  `human.approval.deny`
 
-### Acceptance criteria
+Future production work:
 
-- Signed events verify.
-- Modified signed events fail verification.
-- `run verify --require-signatures` fails if unsigned events are present.
+- decide whether approval grant/deny should get first-class CLI append helpers
+- add signed approval event examples
 
-## Phase 3: Formalise the spec
+## Milestone 4: Harden imports and exports
 
-Move from informal schema sketches to explicit versioned spec documents.
+Codex and Claude imports intentionally avoid copying full prompts, assistant
+text, command output, and tool-result content. That privacy boundary should be
+kept explicit and tested.
 
-Create:
+Completed:
 
-```text
-docs/spec/manifest-v1.md
-docs/spec/run-envelope-v1.md
-docs/spec/event-v1.md
-docs/spec/policy-v1.md
-docs/spec/otel-attributes-v1.md
-```
+- document importer redaction rules field by field
+- review `action`, `resource`, and metadata fields for sensitive leakage
+- add golden tests for OTel and OpenInference exports
 
-Each spec should include:
+Future production work:
 
-- purpose
-- required fields
-- optional fields
-- canonicalisation rules
-- hashing/signing rules where relevant
-- privacy considerations
-- OpenTelemetry/OpenInference mappings where relevant
-- JSON examples
+- add full golden fixture files for Codex and Claude imports
+- add an end-to-end tested consumer import for one target backend, such as
+  Phoenix, Jaeger, or Tempo
 
-## Phase 4: Add formal JSON Schema files
+## Milestone 5: Extract a stable Rust API
 
-Create machine-readable schemas:
+The CLI still owns much of the product surface, but the Rust crate now exposes
+typed inputs for event construction and run-log appending.
 
-```text
-schemas/manifest-v1.schema.json
-schemas/run-envelope-v1.schema.json
-schemas/event-v1.schema.json
-schemas/policy-v1.schema.json
-```
+Completed:
 
-Add tests that validate all examples against the schemas.
+- expose stable functions for building events, appending logs, verifying logs,
+  signing, verifying signatures, and policy checks
 
-## Phase 5: Add a static policy MVP
+Future API work:
 
-The permission model is a key differentiator, so add a small policy engine before adding more observability features.
+- keep the CLI as a thin wrapper over the library
+- add library-level examples
+- define the minimum API needed by Python and TypeScript SDKs
 
-### Target behaviour
+## Milestone 6: Add first real integrations
 
-```bash
-agentprov policy check \
-  --policy examples/policy.json \
-  --agent agent_01hxexample \
-  --action discord.message.create \
-  --resource discord://guild/148756/channel/148756
-```
+Start with examples before committing to full SDK maintenance.
 
-Expected output:
+Completed:
 
-```json
-{
-  "decision": "allow",
-  "policy_id": "policy_research_agent",
-  "policy_version": "v1",
-  "reason": "matched allow rule"
-}
-```
+- OpenAI model-call wrapper example
+- Anthropic model-call wrapper example
+- LiteLLM wrapper example
+- GitHub tool event example
+- Discord tool event example
+- scheduled or cron-triggered run example
+- every example should produce a verifiable AgentProv run log
 
-### MVP policy rules
+## Milestone 7: Collector
 
-Support three rule lists:
+The first local collector is implemented as a SQLite-backed MVP.
 
-- `allow`
-- `deny`
-- `require_approval`
+Completed:
 
-Rule fields:
+- local HTTP ingest server
+- SQLite persistence
+- query API for runs and events
+- verification endpoint
+- import/export path between JSONL files and stored runs
 
-- `action`
-- `resource`
-- optional `expires_at`
+Future production work:
 
-Initial matching can be deliberately simple:
+- authentication and transport security design
+- streaming append endpoint
+- pagination and larger-run query ergonomics
+- Postgres persistence option if needed
 
-- exact match
-- `*` wildcard
-- prefix wildcard suffix such as `discord://guild/123/*`
+## Milestone 8: Read-only UI
 
-## Phase 6: Add the first end-to-end demo
+The first UI is a static read-only HTML dashboard exported from the collector
+database.
 
-A deterministic demo will make the project easier to explain.
+Completed:
 
-### Target command
+- run list
+- permission timeline
+- event timeline
+- verification status
 
-```bash
-agentprov demo manual-tool-run --out demo-output/
-agentprov run verify demo-output/run.jsonl
-```
+Future UI work:
 
-### Demo story
+- live collector-backed web UI
+- richer run detail pages
+- actor chain visualization
+- trace/event tree layout
+- filtering and pagination
 
-The demo should show:
-
-1. A user triggers an agent manually.
-2. The agent has a manifest and capabilities.
-3. The agent checks permission to call a tool.
-4. The tool call is recorded.
-5. The event chain verifies.
-
-Example final output:
-
-```text
-Run verifies
-Agent: research-agent v0.1.0
-Trigger: manual
-Actor chain: danjdewhurst -> hermes -> research-agent
-Events: 4
-Permission checks: 1 allowed
-Tool calls: 1
-Event chain: valid
-Signatures: valid
-```
-
-## Phase 7: Improve README for external readers
-
-The README should become a product landing page, not just a project note.
-
-Add:
-
-- clear problem statement
-- short comparison with Langfuse/Phoenix/AgentOps
-- 30-second demo
-- example run log
-- explanation of event-chain verification
-- installation/build instructions
-- contribution roadmap
-
-## Phase 8: OpenTelemetry export
-
-Once the core provenance model works, add export rather than a custom dashboard.
-
-Target:
-
-```bash
-agentprov export otel runs/run_123.jsonl --out run_123.otlp.json
-agentprov export openinference runs/run_123.jsonl --out run_123.openinference.json
-```
-
-The first export can be JSON rather than a full OTLP network exporter.
-
-## Phase 9: Integrations
-
-After the core is credible, add examples for real agent environments:
-
-- OpenAI/Anthropic/LiteLLM model call wrapper
-- Discord tool example
-- GitHub tool example
-- scheduled/cron run example
-- Phoenix or Langfuse export example
-
-## Suggested GitHub issues
-
-Create these issues first:
-
-1. Implement append-only run logs and `run verify`
-2. Add Ed25519 key generation and event signing
-3. Split schema sketches into versioned spec docs
-4. Add machine-readable JSON Schemas
-5. Add static policy check command
-6. Add deterministic manual tool-run demo
-7. Improve README with 30-second demo
-8. Add OpenTelemetry/OpenInference export format
-
-## Near-term priority
-
-The most important next task is full run-chain verification.
-
-Without it, AgentProv is mostly a documented idea. With it, the project has a concrete primitive:
-
-> A portable run log that can prove whether its own history has been altered.
+Keep UI write paths out of scope until the trust and storage semantics are
+settled.

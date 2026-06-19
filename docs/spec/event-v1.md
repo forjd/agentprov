@@ -59,6 +59,10 @@ The MVP signs the event hash with Ed25519 and stores the signature in the top-le
 - `human.approval.grant`
 - `human.approval.deny`
 
+See `examples/approval-request-event.json`,
+`examples/approval-grant-event.json`, and
+`examples/approval-deny-event.json` for the initial approval event shape.
+
 ## Privacy considerations
 
 Store digests and redacted previews by default. Full prompts, tool inputs, tool outputs and retrieved data should be opt-in.

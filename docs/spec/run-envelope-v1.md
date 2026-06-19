@@ -46,3 +46,13 @@ Initial trigger types:
 ## OpenTelemetry/OpenInference mapping
 
 The run ID can be used as the trace ID or as an AgentProv attribute on exported spans. The actor chain should be preserved under `agentprov.actor_chain`.
+
+## Manifest binding
+
+`agentprov run init --agent <manifest>` records the manifest digest in the first
+`run.start` event under `metadata.agent_manifest_digest`. For signed manifests,
+the digest is the signed payload hash, not a hash of the signature wrapper.
+
+`agentprov run verify <run.jsonl> --manifest <manifest>` verifies that recorded
+digest against the supplied manifest and verifies the manifest signature when
+one is present.

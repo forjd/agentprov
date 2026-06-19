@@ -231,9 +231,7 @@ fn map_codex_event(context: &ImportContext, source_event: &Value) -> Vec<EventDr
                 "command_execution" => (
                     "tool.execute",
                     "shell.command".to_owned(),
-                    item.get("command")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
+                    item_uri(context, item),
                 ),
                 "file_change" | "file_diff" => (
                     "artifact.update",
@@ -676,8 +674,7 @@ fn claude_tool_resource(tool_name: &str, input: Option<&Value>) -> Option<String
         .or_else(|| {
             input
                 .get("command")
-                .and_then(Value::as_str)
-                .map(|command| format!("shell://{command}"))
+                .map(|_| format!("claude://tool/{tool_name}/command"))
         })
         .or_else(|| Some(format!("claude://tool/{tool_name}")))
 }

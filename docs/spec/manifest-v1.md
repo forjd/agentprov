@@ -36,6 +36,13 @@ A signed manifest should include a top-level `signature` object with:
 - `signature`
 - `signed_hash`
 
+The CLI can sign and verify local MVP manifest signatures:
+
+```bash
+agentprov manifest sign examples/manifest.json --key agentprov.key --out manifest.signed.json
+agentprov manifest verify-signature manifest.signed.json
+```
+
 ## Privacy considerations
 
 Manifests should not contain secrets. Store secret scopes/capabilities, not secret values.

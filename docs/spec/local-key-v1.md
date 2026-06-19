@@ -20,6 +20,8 @@ It is not a production key-management system.
 agentprov key generate --out agentprov.key
 agentprov key public --key agentprov.key
 agentprov key inspect --key agentprov.key
+agentprov manifest verify-signature manifest.signed.json
+agentprov event verify-signature event.signed.json
 ```
 
 `key public` prints only public material.

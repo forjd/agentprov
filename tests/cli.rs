@@ -1,3 +1,4 @@
+use agentprov::event::event_hash;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::{Value, json};
@@ -66,6 +67,45 @@ fn event_verify_accepts_matching_hash() {
         .assert()
         .success()
         .stdout(predicate::str::contains("ok: event hash verifies"));
+}
+
+#[test]
+fn validate_command_accepts_examples_and_rejects_invalid_records() {
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["validate", "manifest", "examples/manifest.json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ok: manifest schema validates"));
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["validate", "run-envelope", "examples/run.json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "ok: run-envelope schema validates",
+        ));
+
+    let dir = tempdir().unwrap();
+    let invalid_manifest = dir.path().join("manifest.json");
+    let mut value: Value =
+        serde_json::from_str(&fs::read_to_string("examples/manifest.json").unwrap()).unwrap();
+    value.as_object_mut().unwrap().remove("agent_id");
+    fs::write(
+        &invalid_manifest,
+        serde_json::to_string_pretty(&value).unwrap(),
+    )
+    .unwrap();
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["validate", "manifest", invalid_manifest.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "manifest schema validation failed",
+        ));
 }
 
 #[test]
@@ -148,6 +188,117 @@ fn run_verify_rejects_tampered_log() {
 }
 
 #[test]
+fn run_verify_rejects_wrong_event_schema() {
+    let dir = tempdir().unwrap();
+    let run = dir.path().join("run.jsonl");
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "run",
+            "init",
+            "--agent",
+            "examples/manifest.json",
+            "--trigger",
+            "manual",
+            "--out",
+            run.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut events = read_jsonl_fixture(&run);
+    events[0]["schema"] = Value::String("agentprov.dev/event/v0".to_owned());
+    events[0]["event_hash"] = Value::String(event_hash(&events[0]).unwrap());
+    write_jsonl_fixture(&run, &events);
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["run", "verify", run.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("event schema validation failed"));
+}
+
+#[test]
+fn run_verify_rejects_mixed_run_ids() {
+    let dir = tempdir().unwrap();
+    let run = dir.path().join("run.jsonl");
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "run",
+            "init",
+            "--agent",
+            "examples/manifest.json",
+            "--trigger",
+            "manual",
+            "--out",
+            run.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "event",
+            "append",
+            "--run",
+            run.to_str().unwrap(),
+            "--type",
+            "tool.execute",
+        ])
+        .assert()
+        .success();
+
+    let mut events = read_jsonl_fixture(&run);
+    events[1]["run_id"] = Value::String("run_different".to_owned());
+    events[1]["event_hash"] = Value::String(event_hash(&events[1]).unwrap());
+    write_jsonl_fixture(&run, &events);
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["run", "verify", run.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("run_id mismatch"));
+}
+
+#[test]
+fn run_verify_require_signatures_rejects_unsigned_logs() {
+    let dir = tempdir().unwrap();
+    let run = dir.path().join("run.jsonl");
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "run",
+            "init",
+            "--agent",
+            "examples/manifest.json",
+            "--trigger",
+            "manual",
+            "--out",
+            run.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "run",
+            "verify",
+            run.to_str().unwrap(),
+            "--require-signatures",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("missing signature"));
+}
+
+#[test]
 fn key_generation_inspection_public_and_signature_verification_work() {
     let dir = tempdir().unwrap();
     let key = dir.path().join("agentprov.key");
@@ -205,6 +356,149 @@ fn key_generation_inspection_public_and_signature_verification_work() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("signed hash mismatch"));
+}
+
+#[test]
+fn manifest_signature_verification_work() {
+    let dir = tempdir().unwrap();
+    let key = dir.path().join("agentprov.key");
+    let signed = dir.path().join("manifest.signed.json");
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["key", "generate", "--out", key.to_str().unwrap()])
+        .assert()
+        .success();
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "manifest",
+            "sign",
+            "examples/manifest.json",
+            "--key",
+            key.to_str().unwrap(),
+            "--out",
+            signed.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["manifest", "verify-signature", signed.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ok: manifest signature verifies"));
+
+    let tampered = fs::read_to_string(&signed)
+        .unwrap()
+        .replace("Researches a topic", "Researches a tampered topic");
+    fs::write(&signed, tampered).unwrap();
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["manifest", "verify-signature", signed.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("signed hash mismatch"));
+}
+
+#[test]
+fn run_verify_can_bind_to_manifest_digest() {
+    let dir = tempdir().unwrap();
+    let key = dir.path().join("agentprov.key");
+    let signed_manifest = dir.path().join("manifest.signed.json");
+    let run = dir.path().join("run.jsonl");
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["key", "generate", "--out", key.to_str().unwrap()])
+        .assert()
+        .success();
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "manifest",
+            "sign",
+            "examples/manifest.json",
+            "--key",
+            key.to_str().unwrap(),
+            "--out",
+            signed_manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "run",
+            "init",
+            "--agent",
+            signed_manifest.to_str().unwrap(),
+            "--trigger",
+            "manual",
+            "--out",
+            run.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "run",
+            "verify",
+            run.to_str().unwrap(),
+            "--manifest",
+            signed_manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Manifest: verified"));
+}
+
+#[test]
+fn run_verify_rejects_manifest_digest_mismatch() {
+    let dir = tempdir().unwrap();
+    let run = dir.path().join("run.jsonl");
+    let different_manifest = dir.path().join("manifest.json");
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "run",
+            "init",
+            "--agent",
+            "examples/manifest.json",
+            "--trigger",
+            "manual",
+            "--out",
+            run.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let mut manifest: Value =
+        serde_json::from_str(&fs::read_to_string("examples/manifest.json").unwrap()).unwrap();
+    manifest["version"] = Value::String("0.2.0".to_owned());
+    fs::write(
+        &different_manifest,
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "run",
+            "verify",
+            run.to_str().unwrap(),
+            "--manifest",
+            different_manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("manifest digest mismatch"));
 }
 
 #[test]
@@ -331,6 +625,66 @@ fn policy_check_returns_allow_decision_and_can_emit_event() {
 }
 
 #[test]
+fn policy_check_emits_approval_request_when_required() {
+    let dir = tempdir().unwrap();
+    let run = dir.path().join("run.jsonl");
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "run",
+            "init",
+            "--agent",
+            "examples/manifest.json",
+            "--trigger",
+            "manual",
+            "--out",
+            run.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args([
+            "policy",
+            "check",
+            "--policy",
+            "examples/policy.json",
+            "--agent",
+            "agent_01hxexample",
+            "--action",
+            "github.pr.merge",
+            "--resource",
+            "repo://forjd/agentprov/pull/1",
+            "--emit-event",
+            "--run",
+            run.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("agentprov")
+        .unwrap()
+        .args(["run", "verify", run.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Events: 3"));
+
+    let events = read_jsonl_fixture(&run);
+    assert_eq!(events[1]["event_type"], "permission.check");
+    assert_eq!(
+        events[1]["metadata"]["decision"],
+        Value::String("require_approval".to_owned())
+    );
+    assert_eq!(events[2]["event_type"], "human.approval.request");
+    assert_eq!(
+        events[2]["metadata"]["approval_status"],
+        Value::String("requested".to_owned())
+    );
+}
+
+#[test]
 fn demo_manual_tool_run_generates_verifiable_run_log() {
     let dir = tempdir().unwrap();
 
@@ -399,8 +753,25 @@ fn export_commands_write_json_files() {
 
     let otel_json: Value = serde_json::from_str(&fs::read_to_string(otel).unwrap()).unwrap();
     let oi_json: Value = serde_json::from_str(&fs::read_to_string(openinference).unwrap()).unwrap();
-    assert!(otel_json.get("resourceSpans").is_some());
-    assert!(oi_json.get("spans").is_some());
+    let otel_spans = otel_json["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        .as_array()
+        .unwrap();
+    let oi_spans = oi_json["spans"].as_array().unwrap();
+    assert_eq!(otel_spans.len(), 4);
+    assert_eq!(oi_spans.len(), 4);
+    assert_eq!(otel_spans[0]["name"], Value::String("run.start".to_owned()));
+    assert_eq!(
+        otel_spans[3]["attributes"]["gen_ai.operation.name"],
+        Value::String("execute_tool".to_owned())
+    );
+    assert_eq!(
+        oi_spans[1]["attributes"]["openinference.span.kind"],
+        Value::String("LLM".to_owned())
+    );
+    assert_eq!(
+        oi_spans[3]["attributes"]["openinference.span.kind"],
+        Value::String("TOOL".to_owned())
+    );
 }
 
 #[test]
@@ -414,7 +785,7 @@ fn import_codex_jsonl_writes_verifiable_redacted_run_log() {
         &[
             json!({"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}),
             json!({"type":"turn.started"}),
-            json!({"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","aggregated_output":"SECRET_OUTPUT","exit_code":0,"status":"completed"}}),
+            json!({"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"SECRET_COMMAND","aggregated_output":"SECRET_OUTPUT","exit_code":0,"status":"completed"}}),
             json!({"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"SECRET_MESSAGE"}}),
             json!({"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":2}}),
         ],
@@ -458,6 +829,7 @@ fn import_codex_jsonl_writes_verifiable_redacted_run_log() {
     let content = fs::read_to_string(run).unwrap();
     assert!(content.contains("codex.thread.started"));
     assert!(content.contains("payload_digest"));
+    assert!(!content.contains("SECRET_COMMAND"));
     assert!(!content.contains("SECRET_OUTPUT"));
     assert!(!content.contains("SECRET_MESSAGE"));
 }
@@ -472,7 +844,7 @@ fn import_claude_jsonl_writes_verifiable_redacted_run_log() {
         &[
             json!({"type":"system","subtype":"init","cwd":"/repo","session_id":"23af37d5-430d-4742-8a9c-62a711435dfd","tools":["Read"],"model":"claude-opus-4-8","permissionMode":"dontAsk","claude_code_version":"2.1.183"}),
             json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour"},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}),
-            json!({"type":"assistant","message":{"id":"msg_1","model":"claude-opus-4-8","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/repo/Cargo.toml"}}]},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}),
+            json!({"type":"assistant","message":{"id":"msg_1","model":"claude-opus-4-8","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"SECRET_COMMAND"}}]},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}),
             json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"SECRET_TOOL_RESULT"}]},"tool_use_result":{"type":"text","file":{"filePath":"/repo/Cargo.toml"}},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}),
             json!({"type":"assistant","message":{"id":"msg_2","model":"claude-opus-4-8","content":[{"type":"text","text":"SECRET_FINAL"}]},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}),
             json!({"type":"result","subtype":"success","is_error":false,"duration_ms":10,"num_turns":1,"result":"SECRET_RESULT","session_id":"23af37d5-430d-4742-8a9c-62a711435dfd","usage":{"input_tokens":4,"output_tokens":1}}),
@@ -503,6 +875,7 @@ fn import_claude_jsonl_writes_verifiable_redacted_run_log() {
     let content = fs::read_to_string(run).unwrap();
     assert!(content.contains("claude.session.started"));
     assert!(content.contains("payload_digest"));
+    assert!(!content.contains("SECRET_COMMAND"));
     assert!(!content.contains("SECRET_TOOL_RESULT"));
     assert!(!content.contains("SECRET_FINAL"));
     assert!(!content.contains("SECRET_RESULT"));
@@ -516,4 +889,13 @@ fn write_jsonl_fixture(path: &std::path::Path, values: &[Value]) {
         .unwrap()
         .join("\n");
     fs::write(path, format!("{content}\n")).unwrap();
+}
+
+fn read_jsonl_fixture(path: &std::path::Path) -> Vec<Value> {
+    fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
 }

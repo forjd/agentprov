@@ -1,1 +1,10 @@
 /target
+/demo-output/
+/runs/
+*.key
+*.sqlite
+*.sqlite3
+*.db
+collector.html
+*.otlp.json
+*.openinference.json

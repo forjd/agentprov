@@ -1,0 +1,25 @@
+{
+  "schema": "agentprov.dev/event/v1",
+  "event_id": "evt_approval_request_example",
+  "run_id": "run_01hxexample",
+  "sequence": 2,
+  "timestamp": "2026-06-19T10:00:02Z",
+  "event_type": "human.approval.request",
+  "subject": {
+    "type": "agent",
+    "id": "agent_01hxexample"
+  },
+  "action": "github.pr.merge",
+  "resource": "repo://forjd/agentprov/pull/1",
+  "payload_digest": null,
+  "previous_event_hash": "blake3:previous",
+  "event_hash": null,
+  "signature": null,
+  "key_id": null,
+  "metadata": {
+    "approval_status": "requested",
+    "policy_id": "policy_research_agent",
+    "policy_version": "v1",
+    "reason": "matched require_approval rule"
+  }
+}

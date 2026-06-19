@@ -74,11 +74,7 @@ fn verifying_key(public_key: &str) -> Result<VerifyingKey> {
 pub fn sign_value(value: &mut Value, key: &LocalKeyFile) -> Result<()> {
     remove_field(value, "signature");
     value["key_id"] = Value::String(key.key_id.clone());
-    let hash = if value.get("event_hash").is_some() {
-        event_hash(value)?
-    } else {
-        canonical_hash(value)?
-    };
+    let hash = signed_payload_hash(value)?;
     if value.get("event_hash").is_some() {
         value["event_hash"] = Value::String(hash.clone());
     }
@@ -91,6 +87,16 @@ pub fn sign_value(value: &mut Value, key: &LocalKeyFile) -> Result<()> {
         "signed_hash": hash,
     });
     Ok(())
+}
+
+pub fn signed_payload_hash(value: &Value) -> Result<String> {
+    if value.get("event_hash").is_some() {
+        event_hash(value)
+    } else {
+        let mut unsigned = value.clone();
+        remove_field(&mut unsigned, "signature");
+        canonical_hash(&unsigned)
+    }
 }
 
 pub fn verify_signature(value: &Value) -> Result<()> {
@@ -110,13 +116,7 @@ pub fn verify_signature(value: &Value) -> Result<()> {
         .get("signed_hash")
         .and_then(Value::as_str)
         .context("signature.signed_hash must be present")?;
-    let actual_hash = if value.get("event_hash").is_some() {
-        event_hash(value)?
-    } else {
-        let mut unsigned = value.clone();
-        remove_field(&mut unsigned, "signature");
-        canonical_hash(&unsigned)?
-    };
+    let actual_hash = signed_payload_hash(value)?;
     if signed_hash != actual_hash {
         bail!("signed hash mismatch: expected {signed_hash}, actual {actual_hash}");
     }

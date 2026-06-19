@@ -16,5 +16,17 @@ fn examples_validate_against_json_schemas() {
     validate("schemas/manifest-v1.schema.json", "examples/manifest.json");
     validate("schemas/run-envelope-v1.schema.json", "examples/run.json");
     validate("schemas/event-v1.schema.json", "examples/event.json");
+    validate(
+        "schemas/event-v1.schema.json",
+        "examples/approval-request-event.json",
+    );
+    validate(
+        "schemas/event-v1.schema.json",
+        "examples/approval-grant-event.json",
+    );
+    validate(
+        "schemas/event-v1.schema.json",
+        "examples/approval-deny-event.json",
+    );
     validate("schemas/policy-v1.schema.json", "examples/policy.json");
 }

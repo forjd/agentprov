@@ -21,8 +21,12 @@ Each rule has:
 
 - `action`
 - `resource`
+- optional `expires_at`
 
-Future versions may add `expires_at`, `conditions`, and richer resource matching.
+Expired rules do not match. Invalid `expires_at` values are treated as inactive
+rules.
+
+Future versions may add `conditions` and richer resource matching.
 
 ## Matching rules
 
@@ -39,3 +43,10 @@ The MVP supports:
 3. Require-approval rules are distinct from allow.
 4. Allow rules allow.
 5. Otherwise deny.
+
+## Approval events
+
+When `agentprov policy check --emit-event` evaluates to `require_approval`, the
+CLI writes both a `permission.check` event and a `human.approval.request` event
+to the run log. Approval grants and denials can be represented with
+`human.approval.grant` and `human.approval.deny` events.

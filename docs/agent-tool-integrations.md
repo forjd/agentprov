@@ -35,6 +35,32 @@ The Codex importer maps `thread.started` to `run.start`, `turn.started` to
 messages to `artifact.create`, reasoning/plan updates to `agent.plan`, and
 `turn.completed` to `run.end`.
 
+### Codex redaction rules
+
+Each source JSON object is represented by `payload_digest` and
+`metadata.source_event_digest`.
+
+Copied into metadata:
+
+- source event `type`
+- `thread_id`
+- item `id`, `type`, `status`, and `exit_code`
+- turn `usage`
+
+Copied into event fields:
+
+- lifecycle action names such as `codex.thread.started`
+- item-scoped resources such as `codex://thread/<id>/item/<item-id>`
+- file paths for file-change and file-diff resources
+
+Not copied:
+
+- command text
+- aggregated command output
+- assistant message text
+- reasoning text
+- full tool call input or output payloads
+
 ## Claude Code
 
 Claude Code does not read `AGENTS.md` directly, so this repository includes a
@@ -77,6 +103,38 @@ The Claude importer maps `system:init` to `run.start`, tool-use messages to
 text messages to `artifact.create`, thinking-token events to `agent.plan`, rate
 limit events to `permission.check`, and final `result` events to `run.end` or
 `run.error`.
+
+### Claude Code redaction rules
+
+Each source JSON object is represented by `payload_digest` and
+`metadata.source_event_digest`.
+
+Copied into metadata:
+
+- source event `type` and `subtype`
+- session setup fields such as `cwd`, `model`, `claude_code_version`,
+  `permissionMode`, and declared tool names
+- rate-limit status and type
+- assistant message ID, model, content type, and tool-use ID
+- tool-result type and file path when present
+- result duration, turn count, usage, cost, and error flag
+
+Copied into event fields:
+
+- lifecycle action names such as `claude.session.started`
+- tool names such as `Bash` or `Read`
+- file path resources for file-oriented tools
+- command tool resources as `claude://tool/<tool-name>/command`, without the
+  command text
+
+Not copied:
+
+- assistant text
+- thinking text
+- tool-result content
+- final result text
+- shell command text
+- full tool input JSON
 
 ## Signing Imported Runs
 

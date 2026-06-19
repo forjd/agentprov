@@ -1,11 +1,16 @@
-use crate::canonical::canonical_hash;
+use crate::collector::{CollectorStore, serve};
 use crate::event::{build_event, event_hash, verify_event_hash};
 use crate::export::{to_openinference_span, to_otel_span};
 use crate::integrations::{import_claude_jsonl, import_codex_jsonl};
 use crate::policy::policy_decision;
-use crate::run_log::{append_jsonl, read_jsonl, verify_run_log, write_jsonl};
+use crate::run_log::{
+    AppendEventInput, append_jsonl, next_event_for_run as build_next_event_for_run, read_jsonl,
+    verify_run_log, write_jsonl,
+};
+use crate::schema::{SchemaKind, validate_value};
 use crate::signing::{
-    generate_key, inspect_key_view, public_key_view, read_key, sign_value, verify_signature,
+    generate_key, inspect_key_view, public_key_view, read_key, sign_value, signed_payload_hash,
+    verify_signature,
 };
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -59,6 +64,15 @@ enum Commands {
         #[command(subcommand)]
         command: ImportCommand,
     },
+    Validate {
+        #[arg(value_enum)]
+        kind: ValidateKind,
+        file: PathBuf,
+    },
+    Collector {
+        #[command(subcommand)]
+        command: CollectorCommand,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -73,6 +87,9 @@ enum ManifestCommand {
         key: PathBuf,
         #[arg(long)]
         out: PathBuf,
+    },
+    VerifySignature {
+        file: PathBuf,
     },
 }
 
@@ -93,6 +110,8 @@ enum RunCommand {
         file: PathBuf,
         #[arg(long)]
         require_signatures: bool,
+        #[arg(long)]
+        manifest: Option<PathBuf>,
     },
 }
 
@@ -218,6 +237,62 @@ enum ImportCommand {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum CollectorCommand {
+    Ingest {
+        file: PathBuf,
+        #[arg(long)]
+        db: PathBuf,
+    },
+    Runs {
+        #[arg(long)]
+        db: PathBuf,
+    },
+    Events {
+        run_id: String,
+        #[arg(long)]
+        db: PathBuf,
+    },
+    Verify {
+        run_id: String,
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        require_signatures: bool,
+    },
+    Ui {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    Serve {
+        #[arg(long, default_value = "127.0.0.1:8787")]
+        addr: String,
+        #[arg(long)]
+        db: PathBuf,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ValidateKind {
+    Manifest,
+    RunEnvelope,
+    Event,
+    Policy,
+}
+
+impl From<ValidateKind> for SchemaKind {
+    fn from(value: ValidateKind) -> Self {
+        match value {
+            ValidateKind::Manifest => SchemaKind::Manifest,
+            ValidateKind::RunEnvelope => SchemaKind::RunEnvelope,
+            ValidateKind::Event => SchemaKind::Event,
+            ValidateKind::Policy => SchemaKind::Policy,
+        }
+    }
+}
+
 #[derive(Clone, Debug, ValueEnum)]
 enum TriggerType {
     Manual,
@@ -338,6 +413,8 @@ pub fn run() -> Result<()> {
         Commands::Demo { command } => handle_demo(command),
         Commands::Export { command } => handle_export(command),
         Commands::Import { command } => handle_import(command),
+        Commands::Validate { kind, file } => handle_validate(kind, file),
+        Commands::Collector { command } => handle_collector(command),
     }
 }
 
@@ -345,14 +422,22 @@ fn handle_manifest(command: ManifestCommand) -> Result<()> {
     match command {
         ManifestCommand::Example => print_json(&example_manifest()?),
         ManifestCommand::Hash { file } => {
-            println!("{}", canonical_hash(&read_json_file(&file)?)?);
+            println!("{}", signed_payload_hash(&read_json_file(&file)?)?);
             Ok(())
         }
         ManifestCommand::Sign { file, key, out } => {
             let mut value = read_json_file(&file)?;
+            validate_value(SchemaKind::Manifest, &value)?;
             sign_value(&mut value, &read_key(&key)?)?;
             write_pretty_json(&out, &value)?;
             println!("signed manifest written to {}", out.display());
+            Ok(())
+        }
+        ManifestCommand::VerifySignature { file } => {
+            let value = read_json_file(&file)?;
+            validate_value(SchemaKind::Manifest, &value)?;
+            verify_signature(&value)?;
+            println!("ok: manifest signature verifies");
             Ok(())
         }
     }
@@ -368,6 +453,17 @@ fn handle_run(command: RunCommand) -> Result<()> {
             key,
         } => {
             let manifest = read_json_file(&agent)?;
+            validate_value(SchemaKind::Manifest, &manifest)?;
+            if manifest_signature(&manifest).is_some() {
+                verify_signature(&manifest)?;
+            }
+            let mut metadata = json!({
+                "agent_manifest_digest": signed_payload_hash(&manifest)?,
+                "trigger_type": trigger.to_string(),
+            });
+            if let Some(key_id) = manifest_key_id(&manifest) {
+                metadata["agent_manifest_key_id"] = Value::String(key_id.to_owned());
+            }
             let run_id = format!("run_{}", Uuid::new_v4().simple());
             let mut event = build_event(
                 run_id,
@@ -377,9 +473,7 @@ fn handle_run(command: RunCommand) -> Result<()> {
                 Some(agent.display().to_string()),
                 None,
                 None,
-                Some(
-                    json!({"agent_manifest_digest": canonical_hash(&manifest)?, "trigger_type": trigger.to_string()}),
-                ),
+                Some(metadata),
             )?;
             if let Some(key_path) = key {
                 sign_value(&mut event, &read_key(&key_path)?)?;
@@ -391,11 +485,18 @@ fn handle_run(command: RunCommand) -> Result<()> {
         RunCommand::Verify {
             file,
             require_signatures,
+            manifest,
         } => {
             let report = verify_run_log(&file, require_signatures)?;
+            if let Some(manifest_path) = &manifest {
+                verify_run_manifest_binding(&file, manifest_path)?;
+            }
             println!("Run verifies");
             println!("Events: {}", report.events);
             println!("Event chain: valid");
+            if manifest.is_some() {
+                println!("Manifest: verified");
+            }
             println!(
                 "Signatures: {}",
                 if report.signatures_present {
@@ -476,21 +577,40 @@ fn handle_policy(command: PolicyCommand) -> Result<()> {
             key,
         } => {
             let policy = read_json_file(&policy)?;
+            validate_value(SchemaKind::Policy, &policy)?;
             let decision = policy_decision(&policy, &agent, &action, &resource);
             if emit_event {
                 let run = run.context("--run is required when --emit-event is used")?;
+                let signing_key = key.as_deref().map(read_key).transpose()?;
                 let mut event = next_event_for_run(
                     &run,
                     "permission.check".to_owned(),
-                    Some(action),
-                    Some(resource),
-                    Some(agent),
+                    Some(action.clone()),
+                    Some(resource.clone()),
+                    Some(agent.clone()),
                     Some(decision.clone()),
                 )?;
-                if let Some(key_path) = key {
-                    sign_value(&mut event, &read_key(&key_path)?)?;
+                if let Some(key) = &signing_key {
+                    sign_value(&mut event, key)?;
                 }
                 append_jsonl(&run, &event)?;
+                if decision.get("decision").and_then(Value::as_str) == Some("require_approval") {
+                    let mut approval_event = next_event_for_run(
+                        &run,
+                        "human.approval.request".to_owned(),
+                        Some(action),
+                        Some(resource),
+                        Some(agent),
+                        Some(json!({
+                            "permission_decision": decision,
+                            "approval_status": "requested",
+                        })),
+                    )?;
+                    if let Some(key) = &signing_key {
+                        sign_value(&mut approval_event, key)?;
+                    }
+                    append_jsonl(&run, &approval_event)?;
+                }
                 println!("permission decision event appended to {}", run.display());
             } else {
                 print_json(&decision)?;
@@ -596,6 +716,94 @@ fn handle_import(command: ImportCommand) -> Result<()> {
     }
 }
 
+fn handle_validate(kind: ValidateKind, file: PathBuf) -> Result<()> {
+    let schema_kind = SchemaKind::from(kind);
+    validate_value(schema_kind, &read_json_file(&file)?)?;
+    println!("ok: {} schema validates", schema_kind.name());
+    Ok(())
+}
+
+fn handle_collector(command: CollectorCommand) -> Result<()> {
+    match command {
+        CollectorCommand::Ingest { file, db } => {
+            let mut store = CollectorStore::open(&db)?;
+            let run_id = store.ingest_jsonl_file(&file)?;
+            println!("ingested run {run_id}");
+            Ok(())
+        }
+        CollectorCommand::Runs { db } => {
+            let store = CollectorStore::open(&db)?;
+            print_json(&store.list_runs()?)
+        }
+        CollectorCommand::Events { run_id, db } => {
+            let store = CollectorStore::open(&db)?;
+            print_json(&store.run_events_json(&run_id)?)
+        }
+        CollectorCommand::Verify {
+            run_id,
+            db,
+            require_signatures,
+        } => {
+            let store = CollectorStore::open(&db)?;
+            print_json(&store.verify_run(&run_id, require_signatures)?)
+        }
+        CollectorCommand::Ui { db, out } => {
+            let store = CollectorStore::open(&db)?;
+            fs::write(&out, store.dashboard_html()?)
+                .with_context(|| format!("write {}", out.display()))?;
+            println!("collector UI written to {}", out.display());
+            Ok(())
+        }
+        CollectorCommand::Serve { addr, db } => serve(&addr, &db),
+    }
+}
+
+fn verify_run_manifest_binding(run: &Path, manifest_path: &Path) -> Result<()> {
+    let manifest = read_json_file(manifest_path)?;
+    validate_value(SchemaKind::Manifest, &manifest)?;
+    if manifest_signature(&manifest).is_some() {
+        verify_signature(&manifest)?;
+    }
+
+    let expected_digest = signed_payload_hash(&manifest)?;
+    let events = read_jsonl(run)?;
+    let first = events
+        .first()
+        .with_context(|| format!("run log {} has no events", run.display()))?;
+    let actual_digest = first
+        .pointer("/metadata/agent_manifest_digest")
+        .and_then(Value::as_str)
+        .context("run log does not record metadata.agent_manifest_digest")?;
+    if actual_digest != expected_digest {
+        anyhow::bail!(
+            "manifest digest mismatch: expected {expected_digest}, actual {actual_digest}"
+        );
+    }
+
+    if let Some(expected_key_id) = manifest_key_id(&manifest)
+        && let Some(actual_key_id) = first
+            .pointer("/metadata/agent_manifest_key_id")
+            .and_then(Value::as_str)
+        && actual_key_id != expected_key_id
+    {
+        anyhow::bail!(
+            "manifest key_id mismatch: expected {expected_key_id}, actual {actual_key_id}"
+        );
+    }
+
+    Ok(())
+}
+
+fn manifest_signature(value: &Value) -> Option<&Value> {
+    value.get("signature").filter(|value| !value.is_null())
+}
+
+fn manifest_key_id(value: &Value) -> Option<&str> {
+    manifest_signature(value)
+        .and_then(|signature| signature.get("key_id").and_then(Value::as_str))
+        .or_else(|| value.get("key_id").and_then(Value::as_str))
+}
+
 fn print_import_report(out: &Path, report: &crate::integrations::ImportReport) {
     println!("{} import written to {}", report.provider, out.display());
     println!("Run ID: {}", report.run_id);
@@ -611,29 +819,16 @@ fn next_event_for_run(
     subject: Option<String>,
     metadata: Option<Value>,
 ) -> Result<Value> {
-    let events = read_jsonl(run)?;
-    let last = events
-        .last()
-        .with_context(|| format!("run log {} has no events", run.display()))?;
-    let run_id = last
-        .get("run_id")
-        .and_then(Value::as_str)
-        .context("last event has no run_id")?
-        .to_owned();
-    let previous_hash = last
-        .get("event_hash")
-        .and_then(Value::as_str)
-        .context("last event has no event_hash")?
-        .to_owned();
-    build_event(
-        run_id,
-        events.len() as u64 + 1,
-        event_type,
-        action,
-        resource,
-        Some(previous_hash),
-        subject,
-        metadata,
+    build_next_event_for_run(
+        run,
+        AppendEventInput {
+            event_type,
+            action,
+            resource,
+            subject,
+            metadata,
+            payload_digest: None,
+        },
     )
 }
 

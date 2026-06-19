@@ -47,6 +47,5 @@ jobs:
           Compress-Archive -Path dist/${{ matrix.bin }} -DestinationPath agentprov-${{ matrix.target }}.zip
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            agentprov-${{ matrix.target }}.tar.gz
-            agentprov-${{ matrix.target }}.zip
+          fail_on_unmatched_files: true
+          files: agentprov-${{ matrix.target }}.*
