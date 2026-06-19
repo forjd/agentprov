@@ -43,6 +43,7 @@ Implemented:
   policy records
 - run verification rejects wrong event schema versions and mixed `run_id` values
 - typed Rust inputs for event construction and run-log appending
+- library-level Rust example for embedding AgentProv primitives
 - deterministic OpenAI-style, Anthropic-style, LiteLLM-style, GitHub tool,
   Discord tool, and scheduled-run Rust examples
 - local SQLite collector with CLI ingest, query, and verification commands
@@ -209,11 +210,11 @@ Completed:
 
 - expose stable functions for building events, appending logs, verifying logs,
   signing, verifying signatures, and policy checks
+- add a minimal library-level Rust example
 
 Future API work:
 
 - keep the CLI as a thin wrapper over the library
-- add library-level examples
 - define the minimum API needed by Python and TypeScript SDKs
 
 ## Milestone 6: Add first real integrations

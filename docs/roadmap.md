@@ -91,11 +91,11 @@ Status: partial.
 - typed Rust event and run-log append inputs
 - stable Rust functions for event hashing, run-log verification, signing,
   signature verification, and policy checks
+- minimal library-level Rust example
 
 Future work:
 
 - thin CLI wrappers over the library surface
-- library-level examples
 - Python SDK prototype
 - TypeScript SDK prototype
 - decorators/context managers in dynamic SDKs

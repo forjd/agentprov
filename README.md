@@ -131,6 +131,7 @@ claude -p --output-format stream-json --verbose --no-session-persistence \
 Run deterministic integration examples:
 
 ```bash
+cargo run --example library_api -- runs/library-api.jsonl
 cargo run --example openai_wrapper -- runs/openai-wrapper.jsonl
 cargo run -- run verify runs/openai-wrapper.jsonl
 cargo run --example anthropic_wrapper -- runs/anthropic-wrapper.jsonl
