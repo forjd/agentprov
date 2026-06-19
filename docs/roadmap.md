@@ -123,6 +123,7 @@ Status: partial.
 - optional local signatures for imported events
 - privacy-oriented import tests for selected source payloads
 - documented importer redaction rules
+- fixture-backed golden tests for Codex and Claude imports
 - export shape tests for OTel-style and OpenInference-style JSON
 - deterministic OpenAI-style and Anthropic-style wrapper examples
 - deterministic LiteLLM-style wrapper example
@@ -135,7 +136,6 @@ Future work:
 
 - end-to-end Langfuse/Phoenix export examples
 - AgentOps/Helicone interop notes
-- full golden fixture files for imported runs
 
 ## Phase 8: Collector
 

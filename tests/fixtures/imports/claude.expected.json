@@ -1,0 +1,111 @@
+[
+  {
+    "sequence": 1,
+    "event_type": "run.start",
+    "subject": "claude-code",
+    "action": "claude.session.started",
+    "resource": "claude://session/23af37d5-430d-4742-8a9c-62a711435dfd",
+    "payload_digest": "<digest>",
+    "metadata": {
+      "claude_code_version": "2.1.183",
+      "cwd": "/repo",
+      "model": "claude-opus-4-8",
+      "permission_mode": "dontAsk",
+      "provider": "claude",
+      "source_event_digest": "<digest>",
+      "source_event_type": "system",
+      "source_subtype": "init",
+      "subtype": "init",
+      "tools": [
+        "Read"
+      ]
+    }
+  },
+  {
+    "sequence": 2,
+    "event_type": "permission.check",
+    "subject": "claude-code",
+    "action": "claude.rate_limit",
+    "resource": "claude://rate-limit/five_hour",
+    "payload_digest": "<digest>",
+    "metadata": {
+      "provider": "claude",
+      "rate_limit_type": "five_hour",
+      "source_event_digest": "<digest>",
+      "source_event_type": "rate_limit_event",
+      "status": "allowed"
+    }
+  },
+  {
+    "sequence": 3,
+    "event_type": "tool.execute",
+    "subject": "claude-code",
+    "action": "Bash",
+    "resource": "claude://tool/Bash/command",
+    "payload_digest": "<digest>",
+    "metadata": {
+      "content_type": "tool_use",
+      "message_id": "msg_1",
+      "model": "claude-opus-4-8",
+      "provider": "claude",
+      "source_event_digest": "<digest>",
+      "source_event_type": "assistant",
+      "tool_use_id": "toolu_1"
+    }
+  },
+  {
+    "sequence": 4,
+    "event_type": "tool.execute",
+    "subject": "claude-code",
+    "action": "claude.tool_result",
+    "resource": "claude://tool/toolu_1/result",
+    "payload_digest": "<digest>",
+    "metadata": {
+      "content_type": "tool_result",
+      "file_path": "/repo/Cargo.toml",
+      "provider": "claude",
+      "source_event_digest": "<digest>",
+      "source_event_type": "user",
+      "tool_result_type": "text",
+      "tool_use_id": "toolu_1"
+    }
+  },
+  {
+    "sequence": 5,
+    "event_type": "artifact.create",
+    "subject": "claude-code",
+    "action": "claude.assistant_message",
+    "resource": "claude://message/msg_2",
+    "payload_digest": "<digest>",
+    "metadata": {
+      "content_type": "text",
+      "message_id": "msg_2",
+      "model": "claude-opus-4-8",
+      "provider": "claude",
+      "source_event_digest": "<digest>",
+      "source_event_type": "assistant"
+    }
+  },
+  {
+    "sequence": 6,
+    "event_type": "run.end",
+    "subject": "claude-code",
+    "action": "claude.result.success",
+    "resource": "claude://session/23af37d5-430d-4742-8a9c-62a711435dfd",
+    "payload_digest": "<digest>",
+    "metadata": {
+      "duration_ms": 10,
+      "is_error": false,
+      "num_turns": 1,
+      "provider": "claude",
+      "source_event_digest": "<digest>",
+      "source_event_type": "result",
+      "source_subtype": "success",
+      "subtype": "success",
+      "usage": {
+        "input_tokens": 4,
+        "output_tokens": 1
+      }
+    }
+  }
+]

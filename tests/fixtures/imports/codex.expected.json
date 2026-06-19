@@ -1,0 +1,78 @@
+[
+  {
+    "sequence": 1,
+    "event_type": "run.start",
+    "subject": "codex-cli",
+    "action": "codex.thread.started",
+    "resource": "codex://thread/0199a213-81c0-7800-8aa1-bbab2a035a53",
+    "payload_digest": "<digest>",
+    "metadata": {
+      "provider": "codex",
+      "source_event_digest": "<digest>",
+      "source_event_type": "thread.started",
+      "thread_id": "0199a213-81c0-7800-8aa1-bbab2a035a53"
+    }
+  },
+  {
+    "sequence": 2,
+    "event_type": "agent.invoke",
+    "subject": "codex-cli",
+    "action": "codex.turn.started",
+    "resource": "codex://thread/0199a213-81c0-7800-8aa1-bbab2a035a53",
+    "payload_digest": "<digest>",
+    "metadata": {
+      "provider": "codex",
+      "source_event_digest": "<digest>",
+      "source_event_type": "turn.started"
+    }
+  },
+  {
+    "sequence": 3,
+    "event_type": "tool.execute",
+    "subject": "codex-cli",
+    "action": "shell.command",
+    "resource": "codex://thread/0199a213-81c0-7800-8aa1-bbab2a035a53/item/item_1",
+    "payload_digest": "<digest>",
+    "metadata": {
+      "exit_code": 0,
+      "item_id": "item_1",
+      "item_status": "completed",
+      "item_type": "command_execution",
+      "provider": "codex",
+      "source_event_digest": "<digest>",
+      "source_event_type": "item.completed"
+    }
+  },
+  {
+    "sequence": 4,
+    "event_type": "artifact.create",
+    "subject": "codex-cli",
+    "action": "codex.agent_message",
+    "resource": "codex://thread/0199a213-81c0-7800-8aa1-bbab2a035a53/item/item_2",
+    "payload_digest": "<digest>",
+    "metadata": {
+      "item_id": "item_2",
+      "item_type": "agent_message",
+      "provider": "codex",
+      "source_event_digest": "<digest>",
+      "source_event_type": "item.completed"
+    }
+  },
+  {
+    "sequence": 5,
+    "event_type": "run.end",
+    "subject": "codex-cli",
+    "action": "codex.turn.completed",
+    "resource": "codex://thread/0199a213-81c0-7800-8aa1-bbab2a035a53",
+    "payload_digest": "<digest>",
+    "metadata": {
+      "provider": "codex",
+      "source_event_digest": "<digest>",
+      "source_event_type": "turn.completed",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 2
+      }
+    }
+  }
+]

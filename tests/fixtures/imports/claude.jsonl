@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","cwd":"/repo","session_id":"23af37d5-430d-4742-8a9c-62a711435dfd","tools":["Read"],"model":"claude-opus-4-8","permissionMode":"dontAsk","claude_code_version":"2.1.183"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour"},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}
+{"type":"assistant","message":{"id":"msg_1","model":"claude-opus-4-8","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"SECRET_COMMAND"}}]},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"SECRET_TOOL_RESULT"}]},"tool_use_result":{"type":"text","file":{"filePath":"/repo/Cargo.toml"}},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}
+{"type":"assistant","message":{"id":"msg_2","model":"claude-opus-4-8","content":[{"type":"text","text":"SECRET_FINAL"}]},"session_id":"23af37d5-430d-4742-8a9c-62a711435dfd"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":10,"num_turns":1,"result":"SECRET_RESULT","session_id":"23af37d5-430d-4742-8a9c-62a711435dfd","usage":{"input_tokens":4,"output_tokens":1}}

@@ -175,10 +175,10 @@ Completed:
 - document importer redaction rules field by field
 - review `action`, `resource`, and metadata fields for sensitive leakage
 - add golden tests for OTel and OpenInference exports
+- add fixture-backed golden tests for Codex and Claude imports
 
 Future production work:
 
-- add full golden fixture files for Codex and Claude imports
 - add an end-to-end tested consumer import for one target backend, such as
   Phoenix, Jaeger, or Tempo
 
